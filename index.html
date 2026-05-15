@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0a0f0a" />
+  <title>한강 식물 AI</title>
+
+  <!-- Tabler Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+  <!-- Noto Sans KR -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset & Base ─────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-base:        #0a0f0a;
+      --bg-surface:     #0f1a0f;
+      --bg-elevated:    #132013;
+      --border-dim:     #1e2e1e;
+      --border-mid:     #2e4a2e;
+      --border-bright:  #4a8a4a;
+      --accent:         #6dbf6d;
+      --accent-dim:     #4a8a4a;
+      --text-primary:   #e8f5e8;
+      --text-secondary: #8ab08a;
+      --text-muted:     #4a6a4a;
+      --invasive-bg:    #3a1010;
+      --invasive-border:#6a2020;
+      --invasive-text:  #f08080;
+      --native-bg:      #0f2a1a;
+      --native-border:  #2a5a2a;
+      --native-text:    #6dbf6d;
+      --radius-sm:      8px;
+      --radius-md:      16px;
+      --radius-lg:      24px;
+      --radius-xl:      32px;
+    }
+
+    html, body {
+      height: 100%;
+      background: #050a05;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      font-family: 'Noto Sans KR', -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overscroll-behavior: none;
+    }
+
+    /* ── App Shell ────────────────────────────────── */
+    .app {
+      width: 100%;
+      max-width: 430px;
+      min-height: 100dvh;
+      background: var(--bg-base);
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* subtle noise texture */
+    .app::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      max-width: 430px;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app > * { position: relative; z-index: 1; }
+
+    /* ── Status Bar ───────────────────────────────── */
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 24px 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.3px;
+    }
+    .status-right { display: flex; align-items: center; gap: 6px; }
+    .signal-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-dim); }
+
+    /* ── Header ───────────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 16px 24px 12px;
+    }
+    .app-title { font-size: 26px; font-weight: 700; color: var(--text-primary); letter-spacing: -0.8px; line-height: 1.1; }
+    .app-subtitle { font-size: 10px; color: var(--text-muted); letter-spacing: 1.2px; text-transform: uppercase; margin-top: 3px; }
+    .region-badge {
+      background: var(--bg-elevated);
+      border: 0.5px solid var(--border-mid);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.3px;
+      margin-top: 2px;
+    }
+
+    /* ── Camera Viewport ──────────────────────────── */
+    .viewport-wrap {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 4px 20px 0;
+      gap: 14px;
+    }
+
+    .camera-viewport {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: var(--radius-lg);
+      background: var(--bg-surface);
+      border: 0.5px solid var(--border-mid);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: border-color 0.4s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .camera-viewport.scanning { border-color: var(--accent); }
+    .camera-viewport.result-invasive { border-color: #c04040; }
+    .camera-viewport.result-native   { border-color: var(--accent); }
+
+    /* live video feed */
+    #videoFeed {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: var(--radius-lg);
+      display: none;
+    }
+    #videoFeed.active { display: block; }
+
+    /* capture canvas (hidden) */
+    #captureCanvas { display: none; }
+
+    /* corner brackets */
+    .corner { position: absolute; width: 24px; height: 24px; transition: border-color 0.4s; }
+    .corner-tl { top: 14px; left: 14px; border-top: 2px solid var(--border-bright); border-left: 2px solid var(--border-bright); border-radius: 5px 0 0 0; }
+    .corner-tr { top: 14px; right: 14px; border-top: 2px solid var(--border-bright); border-right: 2px solid var(--border-bright); border-radius: 0 5px 0 0; }
+    .corner-bl { bottom: 14px; left: 14px; border-bottom: 2px solid var(--border-bright); border-left: 2px solid var(--border-bright); border-radius: 0 0 0 5px; }
+    .corner-br { bottom: 14px; right: 14px; border-bottom: 2px solid var(--border-bright); border-right: 2px solid var(--border-bright); border-radius: 0 0 5px 0; }
+    .scanning .corner-tl,
+    .scanning .corner-tr,
+    .scanning .corner-bl,
+    .scanning .corner-br { border-color: var(--accent); }
+
+    /* scan line */
+    .scan-line {
+      position: absolute;
+      left: 6%;
+      width: 88%;
+      height: 1.5px;
+      background: linear-gradient(90deg, transparent 0%, var(--accent-dim) 20%, var(--accent) 50%, var(--accent-dim) 80%, transparent 100%);
+      top: 10%;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .scanning .scan-line {
+      opacity: 1;
+      animation: scanMove 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes scanMove {
+      0%   { top: 10%; }
+      50%  { top: 80%; }
+      100% { top: 10%; }
+    }
+
+    /* viewport idle state */
+    .viewport-idle {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      transition: opacity 0.3s;
+    }
+    .viewport-idle .idle-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: var(--bg-elevated);
+      border: 0.5px solid var(--border-mid);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 32px;
+    }
+    .viewport-idle .idle-text {
+      font-size: 13px;
+      color: var(--text-muted);
+      letter-spacing: 0.2px;
+      text-align: center;
+      line-height: 1.5;
+    }
+    .camera-viewport.scanning .viewport-idle { opacity: 0.3; }
+    .camera-viewport.has-video .viewport-idle { display: none; }
+
+    /* scanning label */
+    .scan-label {
+      position: absolute;
+      bottom: 16px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      color: var(--accent);
+      text-transform: uppercase;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .scanning .scan-label { opacity: 1; animation: blink 1.2s ease-in-out infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── Result Panel ─────────────────────────────── */
+    .result-panel {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 0.5px solid var(--border-dim);
+      border-radius: var(--radius-md);
+      padding: 14px 18px;
+      min-height: 78px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      transition: border-color 0.4s;
+    }
+    .result-panel.invasive { border-color: var(--invasive-border); }
+    .result-panel.native   { border-color: var(--native-border); }
+
+    .result-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .result-idle {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .result-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }
+    .result-latin {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      font-style: italic;
+    }
+    .result-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+    }
+    .status-badge.invasive {
+      background: var(--invasive-bg);
+      border: 0.5px solid var(--invasive-border);
+      color: var(--invasive-text);
+    }
+    .status-badge.native {
+      background: var(--native-bg);
+      border: 0.5px solid var(--native-border);
+      color: var(--native-text);
+    }
+    .confidence-text { font-size: 11px; color: var(--text-muted); }
+
+    .confidence-bar {
+      margin-top: 8px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--bg-elevated);
+      overflow: hidden;
+    }
+    .confidence-fill {
+      height: 100%;
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.9s cubic-bezier(0.4, 0, 0.2, 1), background 0.4s;
+    }
+
+    /* ── Shutter Area ─────────────────────────────── */
+    .shutter-area {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 36px;
+      padding: 10px 0 14px;
+    }
+
+    .side-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--bg-surface);
+      border: 0.5px solid var(--border-mid);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s, transform 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .side-btn:hover  { background: var(--bg-elevated); color: var(--text-secondary); }
+    .side-btn:active { transform: scale(0.92); }
+    .side-btn i { font-size: 20px; }
+
+    /* main shutter button */
+    .shutter-btn {
+      width: 76px;
+      height: 76px;
+      border-radius: 50%;
+      background: var(--text-primary);
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.3s;
+      box-shadow: 0 0 0 7px var(--bg-elevated), 0 0 0 8px var(--border-mid);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .shutter-btn:hover  { transform: scale(1.04); }
+    .shutter-btn:active { transform: scale(0.94); }
+    .shutter-btn.scanning { box-shadow: 0 0 0 7px var(--bg-elevated), 0 0 0 9px var(--accent); }
+
+    .shutter-inner {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--text-primary);
+      border: 2px solid #c8e0c8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .shutter-inner i { font-size: 24px; color: var(--bg-base); }
+
+    /* pulse rings */
+    .pulse-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      border: 1.5px solid var(--accent);
+      opacity: 0;
+    }
+    .shutter-btn.scanning .pulse-ring { animation: pulseRing 1.6s ease-out infinite; }
+    .shutter-btn.scanning .pulse-ring:nth-child(2) { animation-delay: 0.55s; }
+    @keyframes pulseRing {
+      0%   { transform: scale(0.85); opacity: 0.7; }
+      100% { transform: scale(1.5);  opacity: 0; }
+    }
+
+    /* ── Bottom Nav ───────────────────────────────── */
+    .bottom-nav {
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+      border-top: 0.5px solid var(--border-dim);
+      background: var(--bg-base);
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color 0.2s;
+      padding: 4px 20px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .nav-item.active { color: var(--accent); }
+    .nav-item i { font-size: 22px; }
+    .nav-item span { font-size: 9px; font-weight: 500; letter-spacing: 0.5px; }
+
+    /* nav active indicator dot */
+    .nav-dot {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--accent);
+      margin-top: -2px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .nav-item.active .nav-dot { opacity: 1; }
+
+    /* ── Page animations ──────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .header        { animation: fadeUp 0.5s ease both; }
+    .camera-viewport { animation: fadeUp 0.5s 0.1s ease both; }
+    .result-panel  { animation: fadeUp 0.5s 0.18s ease both; }
+    .shutter-area  { animation: fadeUp 0.5s 0.26s ease both; }
+    .bottom-nav    { animation: fadeUp 0.5s 0.34s ease both; }
+  </style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- Status bar (decorative on desktop; real safe area on mobile) -->
+  <div class="status-bar">
+    <span id="clockDisplay">9:41</span>
+    <div class="status-right">
+      <div class="signal-dot"></div>
+      <div class="signal-dot"></div>
+      <div class="signal-dot"></div>
+      <i class="ti ti-battery-2" style="font-size:16px; color: var(--text-muted);"></i>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="app-title">한강 식물 AI</div>
+      <div class="app-subtitle">교란종 판별 시스템</div>
+    </div>
+    <div class="region-badge">한강유역</div>
+  </div>
+
+  <!-- Main viewport + result -->
+  <div class="viewport-wrap">
+
+    <!-- Camera Viewport -->
+    <div class="camera-viewport" id="viewport" onclick="handleViewportTap()">
+      <!-- Live video -->
+      <video id="videoFeed" autoplay playsinline muted></video>
+      <!-- Hidden canvas for capture -->
+      <canvas id="captureCanvas" width="640" height="640"></canvas>
+
+      <!-- Corner brackets -->
+      <div class="corner corner-tl"></div>
+      <div class="corner corner-tr"></div>
+      <div class="corner corner-bl"></div>
+      <div class="corner corner-br"></div>
+
+      <!-- Scan line -->
+      <div class="scan-line"></div>
+
+      <!-- Idle placeholder -->
+      <div class="viewport-idle" id="viewportIdle">
+        <div class="idle-icon">
+          <i class="ti ti-plant-2" aria-hidden="true"></i>
+        </div>
+        <div class="idle-text">식물을 카메라에 비추거나<br>촬영 버튼을 눌러주세요</div>
+      </div>
+
+      <!-- Scanning indicator -->
+      <div class="scan-label" id="scanLabel">AI 분석 중</div>
+    </div>
+
+    <!-- Result Panel -->
+    <div class="result-panel" id="resultPanel">
+      <div class="result-label">판별 결과</div>
+      <div class="result-idle" id="resultContent">촬영 후 결과가 여기에 표시됩니다</div>
+    </div>
+
+  </div>
+
+  <!-- Shutter Controls -->
+  <div class="shutter-area">
+
+    <!-- Gallery button -->
+    <div class="side-btn" id="galleryBtn" onclick="openGallery()" title="갤러리에서 선택">
+      <i class="ti ti-photo" aria-hidden="true"></i>
+    </div>
+    <!-- Hidden file input -->
+    <input type="file" id="galleryInput" accept="image/*" style="display:none" onchange="handleGalleryImage(event)" />
+
+    <!-- Main shutter -->
+    <div class="shutter-btn" id="shutterBtn" onclick="triggerCapture()" aria-label="식물 촬영">
+      <div class="pulse-ring"></div>
+      <div class="pulse-ring"></div>
+      <div class="shutter-inner">
+        <i class="ti ti-camera" aria-hidden="true" id="shutterIcon"></i>
+      </div>
+    </div>
+
+    <!-- History button -->
+    <div class="side-btn" onclick="showHistory()" title="스캔 기록">
+      <i class="ti ti-clock-history" aria-hidden="true"></i>
+    </div>
+
+  </div>
+
+  <!-- Bottom Navigation -->
+  <nav class="bottom-nav">
+    <div class="nav-item active" data-page="scan" onclick="switchNav(this)">
+      <i class="ti ti-camera" aria-hidden="true"></i>
+      <div class="nav-dot"></div>
+      <span>스캔</span>
+    </div>
+    <div class="nav-item" data-page="guide" onclick="switchNav(this)">
+      <i class="ti ti-book-2" aria-hidden="true"></i>
+      <div class="nav-dot"></div>
+      <span>도감</span>
+    </div>
+    <div class="nav-item" data-page="map" onclick="switchNav(this)">
+      <i class="ti ti-map-pin" aria-hidden="true"></i>
+      <div class="nav-dot"></div>
+      <span>지도</span>
+    </div>
+    <div class="nav-item" data-page="history" onclick="switchNav(this)">
+      <i class="ti ti-user" aria-hidden="true"></i>
+      <div class="nav-dot"></div>
+      <span>내 기록</span>
+    </div>
+  </nav>
+
+</div>
+
+<!-- ── Scripts ─────────────────────────────────────── -->
+<script>
+/* ───────────────────────────────────────────────────
+   CONFIG — Roboflow 연동 시 여기만 수정하세요
+   ─────────────────────────────────────────────────── */
+const ROBOFLOW_CONFIG = {
+  publishable_key: "YOUR_PUBLISHABLE_KEY",   // Roboflow 키
+  model:           "hangang-invasive-plants", // 모델 이름
+  version:         1,
+};
+
+/* ───────────────────────────────────────────────────
+   STATE
+   ─────────────────────────────────────────────────── */
+let cameraStream = null;
+let rfModel      = null;
+let isScanning   = false;
+
+const viewport    = document.getElementById('viewport');
+const videoFeed   = document.getElementById('videoFeed');
+const shutterBtn  = document.getElementById('shutterBtn');
+const resultPanel = document.getElementById('resultPanel');
+const resultContent = document.getElementById('resultContent');
+
+/* ───────────────────────────────────────────────────
+   CLOCK
+   ─────────────────────────────────────────────────── */
+function updateClock() {
+  const now = new Date();
+  const h = String(now.getHours()).padStart(2, '0');
+  const m = String(now.getMinutes()).padStart(2, '0');
+  document.getElementById('clockDisplay').textContent = h + ':' + m;
+}
+updateClock();
+setInterval(updateClock, 10000);
+
+/* ───────────────────────────────────────────────────
+   CAMERA INIT
+   ─────────────────────────────────────────────────── */
+async function initCamera() {
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' }, // 후면 카메라 우선
+        width:  { ideal: 1280 },
+        height: { ideal: 1280 },
+      },
+      audio: false,
+    });
+    videoFeed.srcObject = cameraStream;
+    videoFeed.classList.add('active');
+    viewport.classList.add('has-video');
+
+    // Roboflow 모델 로드 (SDK가 있을 때)
+    if (typeof roboflow !== 'undefined') {
+      initRoboflow();
+    }
+  } catch (err) {
+    console.warn('카메라 접근 실패:', err);
+    showError('카메라 접근 권한이 필요합니다.\n브라우저 설정에서 허용해주세요.');
+  }
+}
+
+/* ───────────────────────────────────────────────────
+   ROBOFLOW INIT  (Roboflow SDK CDN 추가 후 활성화)
+   ─────────────────────────────────────────────────── */
+function initRoboflow() {
+  roboflow
+    .auth({ publishable_key: ROBOFLOW_CONFIG.publishable_key })
+    .then(rf => rf.load({
+      model:   ROBOFLOW_CONFIG.model,
+      version: ROBOFLOW_CONFIG.version,
+      onMetadata: () => console.log('Roboflow 모델 로드 완료'),
+    }))
+    .then(model => {
+      rfModel = model;
+      console.log('모델 준비 완료');
+    })
+    .catch(err => console.error('Roboflow 오류:', err));
+}
+
+/* ───────────────────────────────────────────────────
+   CAPTURE & INFERENCE
+   ─────────────────────────────────────────────────── */
+function handleViewportTap() {
+  // 카메라 미실행 상태면 카메라 시작
+  if (!cameraStream) { initCamera(); return; }
+}
+
+async function triggerCapture() {
+  if (isScanning) return;
+  if (!cameraStream) { await initCamera(); return; }
+
+  isScanning = true;
+  setScanning(true);
+
+  try {
+    // Canvas에 현재 프레임 캡처
+    const canvas = document.getElementById('captureCanvas');
+    const ctx    = canvas.getContext('2d');
+    ctx.drawImage(videoFeed, 0, 0, canvas.width, canvas.height);
+
+    let result;
+
+    if (rfModel) {
+      // ── 실제 Roboflow 추론 ──────────────────────────
+      const predictions = await rfModel.detect(canvas);
+      result = parseRoboflowResult(predictions);
+    } else {
+      // ── 데모 모드 (Roboflow 미연동 시) ─────────────
+      await sleep(2200);
+      result = getDemoResult();
+    }
+
+    showResult(result);
+
+  } catch (err) {
+    console.error('추론 오류:', err);
+    showError('분석 중 오류가 발생했습니다. 다시 시도해주세요.');
+  } finally {
+    isScanning = false;
+    setScanning(false);
+  }
+}
+
+/* ───────────────────────────────────────────────────
+   RESULT PARSERS
+   ─────────────────────────────────────────────────── */
+function parseRoboflowResult(predictions) {
+  if (!predictions || predictions.length === 0) {
+    return { found: false };
+  }
+  // 신뢰도 가장 높은 예측 사용
+  const top = predictions.reduce((a, b) => a.confidence > b.confidence ? a : b);
+  const invasiveClasses = ['가시박', '환삼덩굴', '달맞이꽃', '돼지풀', '미국쑥부쟁이', '서양등골나물'];
+  const isInvasive = invasiveClasses.some(c => top.class.includes(c));
+
+  return {
+    found:      true,
+    name:       top.class,
+    latin:      top.latin || '',
+    invasive:   isInvasive,
+    confidence: Math.round(top.confidence * 100),
+  };
+}
+
+/* demo results pool */
+const DEMO_RESULTS = [
+  { found:true, name:'가시박',       latin:'Sicyos angulatus',    invasive:true,  confidence:94 },
+  { found:true, name:'환삼덩굴',     latin:'Humulus japonicus',   invasive:true,  confidence:88 },
+  { found:true, name:'달맞이꽃',     latin:'Oenothera biennis',   invasive:true,  confidence:91 },
+  { found:true, name:'돼지풀',       latin:'Ambrosia artemisiifolia', invasive:true, confidence:85 },
+  { found:true, name:'갈대',         latin:'Phragmites australis',invasive:false, confidence:87 },
+  { found:true, name:'쑥',           latin:'Artemisia princeps',  invasive:false, confidence:82 },
+  { found:true, name:'물억새',       latin:'Miscanthus sacchariflorus', invasive:false, confidence:79 },
+];
+let demoIdx = 0;
+function getDemoResult() { return DEMO_RESULTS[demoIdx++ % DEMO_RESULTS.length]; }
+
+/* ───────────────────────────────────────────────────
+   UI — RESULT DISPLAY
+   ─────────────────────────────────────────────────── */
+function showResult(result) {
+  if (!result.found) {
+    resultContent.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">식물을 인식하지 못했습니다. 다시 시도해주세요.</span>';
+    resultPanel.className = 'result-panel';
+    viewport.className = 'camera-viewport has-video';
+    return;
+  }
+
+  const cls  = result.invasive ? 'invasive' : 'native';
+  const icon = result.invasive ? 'ti-alert-triangle' : 'ti-check';
+  const text = result.invasive ? '교란종' : '자생종';
+  const fillColor = result.invasive ? '#c04040' : 'var(--accent)';
+
+  resultPanel.className = 'result-panel ' + cls;
+  viewport.classList.remove('result-invasive','result-native');
+  viewport.classList.add('result-' + cls);
+
+  resultContent.innerHTML = `
+    <div class="result-name">${result.name}</div>
+    ${result.latin ? `<div class="result-latin">${result.latin}</div>` : ''}
+    <div class="result-meta">
+      <span class="status-badge ${cls}">
+        <i class="ti ${icon}" style="font-size:12px;" aria-hidden="true"></i>
+        ${text}
+      </span>
+      <span class="confidence-text">${result.confidence}% 신뢰도</span>
+    </div>
+    <div class="confidence-bar">
+      <div class="confidence-fill" id="cfill" style="background:${fillColor};"></div>
+    </div>
+  `;
+
+  // animate bar
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const fill = document.getElementById('cfill');
+      if (fill) fill.style.width = result.confidence + '%';
+    });
+  });
+
+  // 스캔 기록 저장
+  saveToHistory(result);
+}
+
+function showError(msg) {
+  resultPanel.className = 'result-panel';
+  resultContent.innerHTML = `<span style="color:var(--text-muted);font-size:13px;">${msg}</span>`;
+}
+
+/* ───────────────────────────────────────────────────
+   UI — SCANNING STATE
+   ─────────────────────────────────────────────────── */
+function setScanning(on) {
+  if (on) {
+    viewport.classList.add('scanning');
+    shutterBtn.classList.add('scanning');
+    document.getElementById('shutterIcon').className = 'ti ti-loader';
+    resultPanel.className = 'result-panel';
+    resultContent.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">AI 분석 중...</span>';
+  } else {
+    viewport.classList.remove('scanning');
+    shutterBtn.classList.remove('scanning');
+    document.getElementById('shutterIcon').className = 'ti ti-camera';
+  }
+}
+
+/* ───────────────────────────────────────────────────
+   GALLERY (이미지 파일에서 추론)
+   ─────────────────────────────────────────────────── */
+function openGallery() {
+  document.getElementById('galleryInput').click();
+}
+
+async function handleGalleryImage(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const img = new Image();
+  img.onload = async () => {
+    isScanning = true;
+    setScanning(true);
+
+    // 갤러리 이미지를 뷰포트 배경으로 표시
+    viewport.style.backgroundImage = `url(${img.src})`;
+    viewport.style.backgroundSize = 'cover';
+    viewport.style.backgroundPosition = 'center';
+
+    // Canvas에 그리기
+    const canvas = document.getElementById('captureCanvas');
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    let result;
+    if (rfModel) {
+      const predictions = await rfModel.detect(canvas);
+      result = parseRoboflowResult(predictions);
+    } else {
+      await sleep(2000);
+      result = getDemoResult();
+    }
+
+    showResult(result);
+    isScanning = false;
+    setScanning(false);
+  };
+  img.src = URL.createObjectURL(file);
+  e.target.value = ''; // reset
+}
+
+/* ───────────────────────────────────────────────────
+   HISTORY (localStorage)
+   ─────────────────────────────────────────────────── */
+function saveToHistory(result) {
+  try {
+    const history = JSON.parse(localStorage.getItem('scanHistory') || '[]');
+    history.unshift({
+      name:       result.name,
+      latin:      result.latin || '',
+      invasive:   result.invasive,
+      confidence: result.confidence,
+      timestamp:  new Date().toISOString(),
+    });
+    localStorage.setItem('scanHistory', JSON.stringify(history.slice(0, 100)));
+  } catch (_) {}
+}
+
+function showHistory() {
+  try {
+    const history = JSON.parse(localStorage.getItem('scanHistory') || '[]');
+    if (!history.length) { alert('아직 스캔 기록이 없습니다.'); return; }
+    const lines = history.slice(0, 5).map(h => {
+      const d = new Date(h.timestamp);
+      const label = h.invasive ? '⚠ 교란종' : '✓ 자생종';
+      return `${label}  ${h.name}  (${h.confidence}%)  ${d.getMonth()+1}/${d.getDate()}`;
+    });
+    alert('최근 스캔 기록\n\n' + lines.join('\n'));
+  } catch (_) {}
+}
+
+/* ───────────────────────────────────────────────────
+   BOTTOM NAV
+   ─────────────────────────────────────────────────── */
+function switchNav(el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  el.classList.add('active');
+}
+
+/* ───────────────────────────────────────────────────
+   UTIL
+   ─────────────────────────────────────────────────── */
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* ───────────────────────────────────────────────────
+   INIT
+   ─────────────────────────────────────────────────── */
+window.addEventListener('DOMContentLoaded', () => {
+  // 카메라를 자동 시작하고 싶으면 아래 주석 해제
+  // initCamera();
+});
+</script>
+
+<!--
+  ──────────────────────────────────────────────────
+  Roboflow SDK 연동 방법:
+
+  1. 아래 <script> 태그 주석 해제 후 본인의 publishable_key 입력
+  2. ROBOFLOW_CONFIG.model 과 .version 을 본인 모델에 맞게 수정
+  3. HTTPS 환경에서 서비스 (카메라 접근은 HTTPS 필수)
+
+  <script src="https://cdn.roboflow.com/0.2.3/roboflow.js"></script>
+  ──────────────────────────────────────────────────
+-->
+
+</body>
+</html>
