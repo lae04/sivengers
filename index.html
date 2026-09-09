@@ -520,6 +520,7 @@ async function callWorkflowOnce(base64) {
         'Authorization': 'Bearer ' + ROBOFLOW_CONFIG.api_key,
       },
       body: JSON.stringify({
+        api_key: ROBOFLOW_CONFIG.api_key,
         inputs: { image: { type: 'base64', value: base64 } },
       }),
     });
