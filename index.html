@@ -515,10 +515,11 @@ async function callWorkflowOnce(base64) {
     const resp = await fetch(ROBOFLOW_CONFIG.endpoint, {
       method:  'POST',
       signal:  ctrl.signal,
-      headers: {
+     //** headers: {
         'Content-Type':  'application/json',
         'Authorization': 'Bearer ' + ROBOFLOW_CONFIG.api_key,
       },
+    *//
       body: JSON.stringify({
         api_key: ROBOFLOW_CONFIG.api_key,
         inputs: { image: { type: 'base64', value: base64 } },
