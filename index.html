@@ -515,7 +515,7 @@ async function callWorkflowOnce(base64) {
       method:  'POST',
       signal:  ctrl.signal,
       headers: {
-        'Content-Type':  'application/json,
+        'Content-Type':  'application/json',
       },
       body: JSON.stringify({
         inputs: { image: { type: 'base64', value: base64 } },
