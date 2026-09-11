@@ -295,7 +295,7 @@
     .shutter-area    { animation: fadeUp 0.5s 0.26s ease both; }
     .bottom-nav      { animation: fadeUp 0.5s 0.34s ease both; }
 
-    /* ── API 키 미설정 배너 ── */
+    /* ── 모델 로딩 / 오류 배너 ── */
     .demo-banner {
       background: #1a1a0a;
       border-bottom: 0.5px solid #3a3a10;
@@ -306,6 +306,10 @@
       letter-spacing: 0.3px;
     }
   </style>
+
+  <!-- Teachable Machine 클라이언트 추론 라이브러리 -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
 </head>
 <body>
 
@@ -321,8 +325,8 @@
     </div>
   </div>
 
-  <!-- API 키 미설정 시 표시 (JS에서 제거) -->
-  <div class="demo-banner" id="demoBanner">⚠ 데모 모드 — API 키를 입력하면 실제 AI 추론이 활성화됩니다</div>
+  <!-- 모델 로딩 중 / 로딩 실패 시 표시 (JS에서 제어) -->
+  <div class="demo-banner" id="demoBanner">⏳ AI 모델을 불러오는 중입니다...</div>
 
   <div class="header">
     <div>
@@ -404,35 +408,31 @@
 
 <script>
 /* =============================================================
-   CONFIG
-   - api_key : app.roboflow.com/settings/api 에서 복사
-   - endpoint : 워크플로우 엔드포인트 (변경 불필요)
+   CONFIG — Teachable Machine
+   modelURL : Export 패널에서 복사한 모델 주소 (끝에 / 포함)
    ============================================================= */
-const ROBOFLOW_CONFIG = {
-  endpoint:       "https://sivengers.jerry022358.workers.dev",
-  timeout_ms:     15000,
-  max_retries:    2,
-  retry_delay_ms: 800,
+const TM_CONFIG = {
+  modelURL: "https://teachablemachine.withgoogle.com/models/i9gpJrJau/",
 };
 
 /* =============================================================
-   교란종 클래스 목록
-   Roboflow 모델 학습 후 실제 클래스명으로 업데이트하세요.
+   교란종 정보 테이블
+   ⚠ 키(왼쪽)는 Teachable Machine에서 만든 클래스 이름과 정확히 똑같아야 함
    ============================================================= */
-const INVASIVE_CLASSES = [
-  'gasibak',             '가시박',
-  'hwansam',             '환삼덩굴',
-  'dalmaejikkot',        '달맞이꽃',
-  'dwaejipul',           '돼지풀',
-  'migukssubbujangyi',   '미국쑥부쟁이',
-  'seoyangdeunggolnamul','서양등골나물',
-];
+const PLANT_INFO = {
+  '가시박':        { latin: 'Sicyos angulatus',        invasive: true },
+  '돼지풀':        { latin: 'Ambrosia artemisiifolia',  invasive: true },
+  '단풍잎 돼지풀': { latin: 'Ambrosia trifida',          invasive: true },
+  '환삼덩굴':      { latin: 'Humulus japonicus',        invasive: true },
+};
 
 /* =============================================================
    STATE
    ============================================================= */
 let cameraStream = null;
 let isScanning   = false;
+let tmModel      = null;
+let IS_LIVE      = false;   // Teachable Machine 모델 로딩 완료 시 true
 
 const viewport      = document.getElementById('viewport');
 const videoFeed     = document.getElementById('videoFeed');
@@ -440,19 +440,21 @@ const shutterBtn    = document.getElementById('shutterBtn');
 const resultPanel   = document.getElementById('resultPanel');
 const resultContent = document.getElementById('resultContent');
 
-const IS_LIVE = ROBOFLOW_CONFIG.api_key !== 'YOUR_ROBOFLOW_API_KEY';
-
 /* =============================================================
    INIT
    ============================================================= */
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   updateClock();
   setInterval(updateClock, 10000);
 
-  // API 키가 설정되어 있으면 배너 숨기기
   const banner = document.getElementById('demoBanner');
-  if (IS_LIVE) {
-    banner.remove();
+  try {
+    await loadTMModel();
+    IS_LIVE = true;
+    if (banner) banner.remove();
+  } catch (err) {
+    console.error('모델 로딩 실패:', err);
+    if (banner) banner.textContent = '⚠ AI 모델을 불러오지 못했습니다. 새로고침해주세요.';
   }
 });
 
@@ -489,153 +491,48 @@ function handleViewportTap() {
 }
 
 /* =============================================================
-   ROBOFLOW WORKFLOW CLIENT
-
-   엔드포인트 : POST https://serverless.roboflow.com/-d1vla/workflows/my-first-project-pj3zl
-   인증       : Authorization: Bearer <api_key>  (header-based, inference v1.5+)
-   입력 형식  : { "inputs": { "image": { "type": "base64", "value": "..." } } }
-   응답 형식  : 배열 — 이미지 1장당 항목 1개
+   TEACHABLE MACHINE 클라이언트 (전부 브라우저 안에서 처리, 서버 호출 없음)
    ============================================================= */
 
-/** Canvas → JPEG base64 (data: prefix 제거) */
-function canvasToBase64(canvas, quality = 0.85) {
-  return canvas.toDataURL('image/jpeg', quality).split(',')[1];
+/** 모델 로딩 */
+async function loadTMModel() {
+  tmModel = await tmImage.load(TM_CONFIG.modelURL + 'model.json', TM_CONFIG.modelURL + 'metadata.json');
 }
 
-/** sleep (retry backoff용) */
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+/** canvas(또는 image/video) → 판별 결과 */
+async function classifyWithTM(canvasEl) {
+  const predictions = await tmModel.predict(canvasEl);
 
-/** 워크플로우 단일 HTTP 호출 */
-async function callWorkflowOnce(base64) {
-  const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), ROBOFLOW_CONFIG.timeout_ms);
-
-  try {
-    const resp = await fetch(ROBOFLOW_CONFIG.endpoint, {
-      method:  'POST',
-      signal:  ctrl.signal,
-      headers: {
-        'Content-Type':  'application/json',
-      },
-      body: JSON.stringify({
-        inputs: { image: { type: 'base64', value: base64 } },
-      }),
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => resp.statusText);
-      throw new RoboflowError(`HTTP ${resp.status}: ${errText}`, resp.status);
-    }
-
-    const data = await resp.json();
-
-    // 응답은 배열 (입력 이미지당 1개)
-    if (!Array.isArray(data) || data.length === 0) {
-      throw new RoboflowError('워크플로우 응답이 비어 있습니다.', 0);
-    }
-    return data[0];
-
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * 재시도 래퍼 — 네트워크 오류 / 5xx 만 재시도
- * 4xx (인증 오류 등) 는 즉시 실패
- */
-async function runWorkflow(base64) {
-  let lastErr;
-  for (let attempt = 0; attempt <= ROBOFLOW_CONFIG.max_retries; attempt++) {
-    try {
-      return await callWorkflowOnce(base64);
-    } catch (err) {
-      lastErr = err;
-      const isRetryable = !(err instanceof RoboflowError) || err.status >= 500;
-      if (!isRetryable || attempt === ROBOFLOW_CONFIG.max_retries) break;
-      console.warn(`Roboflow 재시도 ${attempt + 1}/${ROBOFLOW_CONFIG.max_retries}:`, err.message);
-      await sleep(ROBOFLOW_CONFIG.retry_delay_ms * (attempt + 1));
-    }
-  }
-  throw lastErr;
-}
-
-/** 타입 있는 에러 클래스 */
-class RoboflowError extends Error {
-  constructor(message, status) {
-    super(message);
-    this.name   = 'RoboflowError';
-    this.status = status;
-  }
-}
-
-/* =============================================================
-   RESPONSE PARSER
-
-   워크플로우 응답 예시:
-   [
-     {
-       "predictions": {
-         "predictions": [
-           { "class": "gasibak", "confidence": 0.94, "x": 320, "y": 240, "width": 100, "height": 80 }
-         ],
-         "image": { "width": 640, "height": 640 }
-       }
-     }
-   ]
-
-   출력 키가 바뀌어도 깨지지 않도록 방어적으로 파싱합니다.
-   ============================================================= */
-function parseWorkflowResult(raw) {
-  let preds = [];
-
-  if (Array.isArray(raw?.predictions?.predictions)) {
-    preds = raw.predictions.predictions;
-  } else if (Array.isArray(raw?.predictions)) {
-    preds = raw.predictions;
-  } else {
-    // 워크플로우 출력 키를 순회해서 배열 탐색
-    for (const val of Object.values(raw || {})) {
-      if (Array.isArray(val?.predictions)) { preds = val.predictions; break; }
-      if (Array.isArray(val))              { preds = val;             break; }
-    }
+  let top = predictions[0];
+  for (const p of predictions) {
+    if (p.probability > top.probability) top = p;
   }
 
-  if (!preds.length) return { found: false };
-
-  // 신뢰도 최고 예측 선택
-  const top = preds.reduce((a, b) =>
-    (a.confidence ?? 0) > (b.confidence ?? 0) ? a : b
-  );
-
-  const className  = top.class ?? top.class_name ?? top.label ?? '알 수 없음';
-  const confidence = Math.round((top.confidence ?? 0) * 100);
-  const lowerClass = className.toLowerCase();
-  const isInvasive = INVASIVE_CLASSES.some(c => lowerClass.includes(c.toLowerCase()));
+  const info = PLANT_INFO[top.className] || {};
 
   return {
     found:      true,
-    name:       className,
-    latin:      top.latin ?? '',
-    invasive:   isInvasive,
-    confidence,
+    name:       top.className,
+    latin:      info.latin || '',
+    invasive:   info.invasive ?? true,
+    confidence: Math.round(top.probability * 100),
   };
 }
 
 /* =============================================================
-   DEMO MODE  (API 키 미설정 시)
+   DEMO MODE  (모델 로딩 실패 시 대체 표시)
    ============================================================= */
 const DEMO_RESULTS = [
-  { found:true, name:'가시박',   latin:'Sicyos angulatus',         invasive:true,  confidence:94 },
-  { found:true, name:'환삼덩굴', latin:'Humulus japonicus',         invasive:true,  confidence:88 },
-  { found:true, name:'달맞이꽃', latin:'Oenothera biennis',         invasive:true,  confidence:91 },
-  { found:true, name:'돼지풀',   latin:'Ambrosia artemisiifolia',   invasive:true,  confidence:85 },
-  { found:true, name:'갈대',     latin:'Phragmites australis',      invasive:false, confidence:87 },
-  { found:true, name:'쑥',       latin:'Artemisia princeps',        invasive:false, confidence:82 },
-  { found:true, name:'물억새',   latin:'Miscanthus sacchariflorus', invasive:false, confidence:79 },
+  { found:true, name:'가시박',        latin:'Sicyos angulatus',       invasive:true, confidence:94 },
+  { found:true, name:'환삼덩굴',      latin:'Humulus japonicus',      invasive:true, confidence:88 },
+  { found:true, name:'돼지풀',        latin:'Ambrosia artemisiifolia',invasive:true, confidence:85 },
+  { found:true, name:'단풍잎 돼지풀', latin:'Ambrosia trifida',       invasive:true, confidence:90 },
 ];
 let demoIdx = 0;
 function getDemoResult() { return DEMO_RESULTS[demoIdx++ % DEMO_RESULTS.length]; }
+
+/** sleep */
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 /* =============================================================
    CAPTURE & INFERENCE
@@ -655,13 +552,10 @@ async function triggerCapture() {
     let result;
 
     if (IS_LIVE) {
-      // 실제 Roboflow 워크플로우 호출
-      const b64 = canvasToBase64(canvas);
-      const raw = await runWorkflow(b64);
-      result    = parseWorkflowResult(raw);
+      result = await classifyWithTM(canvas);
     } else {
-      // 데모 모드
-      await sleep(2200);
+      // 모델 로딩 실패 시 대체 표시
+      await sleep(1200);
       result = getDemoResult();
     }
 
@@ -669,10 +563,7 @@ async function triggerCapture() {
 
   } catch (err) {
     console.error('추론 오류:', err);
-    const msg = err instanceof RoboflowError
-      ? `Roboflow 오류 (${err.status}): ${err.message}`
-      : '분석 중 오류가 발생했습니다. 다시 시도해주세요.';
-    showError(msg);
+    showError('분석 중 오류가 발생했습니다. 다시 시도해주세요.');
   } finally {
     isScanning = false;
     setScanning(false);
@@ -704,11 +595,9 @@ async function handleGalleryImage(e) {
     let result;
     try {
       if (IS_LIVE) {
-        const b64 = canvasToBase64(canvas);
-        const raw = await runWorkflow(b64);
-        result    = parseWorkflowResult(raw);
+        result = await classifyWithTM(canvas);
       } else {
-        await sleep(2000);
+        await sleep(1000);
         result = getDemoResult();
       }
       showResult(result);
@@ -720,7 +609,7 @@ async function handleGalleryImage(e) {
       setScanning(false);
     }
   };
-  img.src      = URL.createObjectURL(file);
+  img.src        = URL.createObjectURL(file);
   e.target.value = '';
 }
 
